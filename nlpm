@@ -1,0 +1,22 @@
+#!/usr/bin/bash
+
+# Copied from nelua
+# implement realpath case it's not present (Mac OS X for example)
+if ! [ -x "$(command -v realpath)" ]; then
+  realpath() {
+    OURPWD=$PWD
+    cd "$(dirname "$1")"
+    LINK=$(readlink "$(basename "$1")")
+    while [ "$LINK" ]; do
+      cd "$(dirname "$LINK")"
+      LINK=$(readlink "$(basename "$1")")
+    done
+    REALPATH="$PWD/$(basename "$1")"
+    cd "$OURPWD"
+    echo "$REALPATH"
+  }
+fi
+
+nlpm_dir=$(dirname "$(realpath "$0")")
+
+nelua --script $nlpm_dir/nlpm.lua -- $@
