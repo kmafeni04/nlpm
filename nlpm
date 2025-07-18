@@ -1,4 +1,4 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 
 # Copied from nelua
 # implement realpath case it's not present (Mac OS X for example)
