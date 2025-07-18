@@ -11,7 +11,10 @@ local fs = require("nelua.utils.fs")
 local lfs = require("lfs")
 
 local nl_package_name <const> = "nlpm_package"
-local nl_package_path = nl_package_name .. ".lua"
+local nl_package_path <const> = nl_package_name .. ".lua"
+local package_variable <const> = "NLPM_PACKAGES_PATH"
+local log_variable <const> = "NLPM_LOG"
+local log <const> = os.getenv(log_variable)
 local root_dir <const> = lfs.currentdir()
 
 ---@param ok any
@@ -25,13 +28,14 @@ end
 
 local function run_command(cmd)
   local on_windows = package.config:sub(1, 1) == "\\"
-  if on_windows then
+  if not log then
+    if not on_windows then
+      return os.execute(cmd .. " > /dev/null 2>&1")
+    end
     return os.execute(cmd .. " > NUL 2>&1")
-    -- return os.execute(cmd .. " ")
-  else
-    return os.execute(cmd .. " > /dev/null 2>&1")
-    -- return os.execute(cmd .. " ")
   end
+  print(cmd)
+  return os.execute(cmd)
 end
 
 ---@param path string
@@ -98,7 +102,7 @@ local function install(package_dir, dependency, depth)
   if not fs.isdir(folder_name) then
     print(('Installing pacakage "%s"...'):format(folder_name))
     ok, err = run_command(("git clone --depth 1 %s %s "):format(dependency.repo, folder_name))
-    mild_assert(ok, "Failed to clone repo, confirm correct repo")
+    mild_assert(ok, ("Failed to clone repo for '%s', confirm correct repo"):format(folder_name))
     ok, err = lfs.chdir(folder_name)
     mild_assert(ok, err)
     if fs.isfile(nl_package_path) then
@@ -115,10 +119,12 @@ local function install(package_dir, dependency, depth)
       lfs.chdir(current_dir)
     end
     local tag = dep_type == "v"
-    ok, err = run_command("git fetch origin " .. dep_version)
-    mild_assert(ok, "Failed to fetch commit or tag, confirm correct version")
-    ok, err = run_command(("git checkout %s"):format(tag and dep_type .. dep_version or dep_version))
-    mild_assert(ok, "Failed to checkout commit or tag, confirm correct version")
+    ok, err =
+      run_command(("git fetch origin %s"):format((tag and ("tag %s%s"):format(dep_type, dep_version) or dep_version)))
+    mild_assert(ok, ("Failed to fetch commit or tag for '%s', confirm correct version"):format(folder_name))
+    ok, err =
+      run_command(("git checkout %s"):format(tag and ("tags/%s%s"):format(dep_type, dep_version) or dep_version))
+    mild_assert(ok, ("Failed to checkout commit or tag for '%s', confirm correct version"):format(folder_name))
     mild_assert(ok, err)
     remove_file_or_dir(".git")
     lfs.chdir(package_dir)
@@ -171,16 +177,20 @@ local function help()
   print(([[Usage: nlpm [-h] <command> ...
 
 Options:
-   -h, --help     Show this help message and exit.
+   -h, --help           Show this help message and exit.
 
 Commands:
-   install        Installs all dependencies defined in your '%s' file into your nlpm_packages directory
-   clean          Removes any packages not listed in your '%s' file
-   script         Runs a script specified in your '%s' file
-   run            Runs a command passed in as arguments from command line
-   new            Creates a new '%s' file in the current directory if no file is found
-   nuke           Deletes the packages directory 
-]]):format(nl_package_path, nl_package_path, nl_package_path, nl_package_path))
+   install              Installs all dependencies defined in your '%s' file into your nlpm_packages directory
+   clean                Removes any packages not listed in your '%s' file
+   script               Runs a script specified in your '%s' file
+   run                  Runs a command passed in as arguments from command line, pass -- as the next arg to stop nlpm from handling args
+   new                  Creates a new '%s' file in the current directory if no file is found
+   nuke                 Deletes the packages directory 
+
+Variables:
+   %s   Sets the directory where packages are installed
+   %s             Pass this to log what commands are being run and their outputs, the value isn't read, the variable just needs to exist
+]]):format(nl_package_path, nl_package_path, nl_package_path, nl_package_path, package_variable, log_variable))
 end
 
 if #arg == 0 then
@@ -198,7 +208,7 @@ if not (arg[1] and arg[1] == "run" and arg[2] and arg[2] == "--") then
   end
 end
 
-local packages_dir = fs.abspath(os.getenv("NLPM_PACKAGES_PATH") or "./nlpm_packages")
+local packages_dir = fs.abspath(os.getenv(package_variable) or "./nlpm_packages")
 
 if arg[1] == "install" then
   mild_assert(fs.isfile(nl_package_path), "File, '" .. nl_package_path .. "', does not exist")
