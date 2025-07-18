@@ -10,58 +10,74 @@
 local fs = require("nelua.utils.fs")
 local lfs = require("lfs")
 
-local nl_package_name <const> = "nlpm_package"
-local nl_package_path <const> = nl_package_name .. ".lua"
-local package_variable <const> = "NLPM_PACKAGES_PATH"
-local log_variable <const> = "NLPM_LOG"
-local log <const> = os.getenv(log_variable)
-local root_dir <const> = lfs.currentdir()
+local NLPM_PACKAGE_NAME <const> = "nlpm_package"
+local NLPM_PACKAGE_FILE <const> = NLPM_PACKAGE_NAME .. ".lua"
+local NLPM_PACKAGE_VARIABLE <const> = "NLPM_PACKAGES_PATH"
+local NLPM_LOG_VARIABLE <const> = "NLPM_LOG"
+local NLPM_LOG_ENABLED <const> = os.getenv(NLPM_LOG_VARIABLE)
+local ROOT_DIR <const> = lfs.currentdir()
+local GITIGNORE <const> = ".gitignore"
+local ON_WINDOWS <const> = package.config:sub(1, 1) == "\\"
+
+local DEFAULT_NELUA_PATHS <const> = {
+  "./?.nelua",
+  "./?/init.nelua",
+  "/usr/local/lib/nelua/lib/?.nelua",
+  "/usr/local/lib/nelua/lib/?/init.nelua",
+}
+
+--NOTE: Might use later but really on the fence about this
+local function log(message)
+  if NLPM_LOG_ENABLED then
+    print("[LOG] " .. message)
+  end
+end
 
 ---@param ok any
 ---@param err string?
 local function mild_assert(ok, err)
   if not ok then
-    io.stderr:write((err and err or "Assert hit") .. "\n")
+    local info = debug.getinfo(2)
+    local error_msg = err or ("Assertion failed: %s:%s"):format(info.source, info.currentline)
+    io.stderr:write("Error: " .. error_msg .. "\n")
     os.exit(1)
   end
 end
 
+---@param cmd string
+---@return boolean? success
 local function run_command(cmd)
-  local on_windows = package.config:sub(1, 1) == "\\"
-  if not log then
-    if not on_windows then
-      return os.execute(cmd .. " > /dev/null 2>&1")
-    end
-    return os.execute(cmd .. " > NUL 2>&1")
+  log("Executing: " .. cmd)
+  local result
+  if not NLPM_LOG_ENABLED then
+    result = os.execute(ON_WINDOWS and cmd .. " > NUL 2>&1" or cmd .. " > /dev/null 2>&1")
+  else
+    result = os.execute(cmd)
   end
-  print("COMMAND: " .. cmd)
-  return os.execute(cmd)
+  return result
 end
 
 ---@param path string
 local function remove_file_or_dir(path)
-  mild_assert(fs.isfile(path) or fs.isdir(path), "Path '" .. path .. "', does not exist")
-  if lfs.attributes(path).mode == "directory" then
+  if not (fs.isfile(path) or fs.isdir(path)) then
+    return
+  end
+
+  local attr = lfs.attributes(path)
+  if not attr then
+    return
+  end
+
+  if attr.mode == "directory" then
     for file in lfs.dir(path) do
       if file ~= "." and file ~= ".." then
         local sub_path = path .. "/" .. file
-        local attr = lfs.attributes(sub_path)
-        if attr.mode == "directory" then
-          remove_file_or_dir(sub_path)
-        else
-          os.remove(sub_path)
-        end
+        remove_file_or_dir(sub_path)
       end
     end
     lfs.rmdir(path)
   else
     os.remove(path)
-  end
-end
-
-local function assert_remove_file_or_dir(ok, path)
-  if not ok then
-    remove_file_or_dir(path)
   end
 end
 
@@ -71,219 +87,201 @@ local function get_packages(package_dir)
   local packages = {}
   if fs.isdir(package_dir) then
     for package in lfs.dir(package_dir) do
-      table.insert(packages, fs.abspath(package_dir .. "/" .. package) .. "/?.nelua")
-      table.insert(packages, fs.abspath(package_dir .. "/" .. package) .. "/?/init.nelua")
+      if package ~= "." and package ~= ".." then
+        local abs_path = fs.abspath(package_dir .. "/" .. package)
+        table.insert(packages, abs_path .. "/?.nelua")
+        table.insert(packages, abs_path .. "/?/init.nelua")
+      end
     end
   end
   return packages
 end
 
 ---@param dependency PackageDependency
----@return string
----@return string
----@return string
+---@return string dep_name
+---@return string dep_type
+---@return string dep_version
 local function gen_dep_name(dependency)
-  local dep_type = ""
-  local dep_version = ""
-  if dependency.version then
-    mild_assert(dependency.version ~= "")
-    dep_type, dep_version = dependency.version:match("([%#v])(.+)")
-    mild_assert(dep_type)
-  else
-    dep_type = "#"
-    dep_version = "HEAD"
+  local dep_type = "#"
+  local dep_version = "HEAD"
+
+  if dependency.version and dependency.version ~= "" then
+    local parsed_type, parsed_version = dependency.version:match("([%#v])(.+)")
+    mild_assert(
+      parsed_type and parsed_version,
+      ("Invalid version format '%s' for dependency '%s'. Use #<hash> or v<tag>"):format(
+        dependency.version,
+        dependency.name
+      )
+    )
+    dep_type = parsed_type
+    dep_version = parsed_version
   end
+
   return ("%s@%s%s"):format(dependency.name, dep_type, dep_version), dep_type, dep_version
 end
 
 ---@param package_dir string
 ---@param dependency PackageDependency
+---@param depth? boolean
 local function install(package_dir, dependency, depth)
+  local original_dir = lfs.currentdir()
+
   local ok, err = lfs.chdir(package_dir)
-  mild_assert(ok, err)
-  local folder_name, dep_type, dep_version = gen_dep_name(dependency)
-  assert_remove_file_or_dir(not (dep_version == "HEAD" and fs.isdir(folder_name) and not depth), folder_name)
-  if not fs.isdir(folder_name) then
-    print(('Installing pacakage "%s"...'):format(folder_name))
+  mild_assert(ok, ("Failed to change to package directory: %s"):format(err or "unknown error"))
 
-    ok, err = run_command(("git clone --depth 1 %s %s "):format(dependency.repo, folder_name))
-    assert_remove_file_or_dir(ok, folder_name)
-    mild_assert(ok, ("Failed to clone repo for '%s', confirm correct repo url"):format(folder_name))
+  local dep_name, dep_type, dep_version = gen_dep_name(dependency)
+  local abs_dep_path = fs.abspath(dep_name)
 
-    ok, err = lfs.chdir(folder_name)
-    mild_assert(ok, err)
+  -- Clean up existing HEAD installations on fresh installs
+  if dep_version == "HEAD" and fs.isdir(dep_name) and not depth then
+    remove_file_or_dir(dep_name)
+  end
 
-    if fs.isfile(nl_package_path) then
+  if not fs.isdir(dep_name) then
+    print(('Installing package "%s"...'):format(dep_name))
+
+    -- Clone the repository
+    local clone_success = run_command(("git clone --depth 1 %s %s"):format(dependency.repo, dep_name))
+    mild_assert(
+      clone_success,
+      ("Failed to clone repository for '%s'. Please verify the repository URL."):format(dep_name)
+    )
+
+    ok, err = lfs.chdir(dep_name)
+    mild_assert(ok, ("Failed to enter cloned directory: %s"):format(err or "unknown error"))
+
+    if fs.isfile(NLPM_PACKAGE_FILE) then
       local current_dir = lfs.currentdir()
-      lfs.chdir(root_dir)
-      local sub_require_path = (package_dir):sub(#root_dir + 2) .. "." .. folder_name .. "." .. nl_package_name
-      ---@type Package
-      local sub_package = require(sub_require_path)
-      if sub_package.dependencies then
+      lfs.chdir(ROOT_DIR)
+
+      local sub_require_path = (package_dir):sub(#ROOT_DIR + 2) .. "." .. dep_name .. "." .. NLPM_PACKAGE_NAME
+      local sub_package_ok, sub_package = pcall(require, sub_require_path)
+
+      if sub_package_ok and sub_package.dependencies then
         for _, dep in ipairs(sub_package.dependencies) do
           install(package_dir, dep, true)
         end
       end
+
       lfs.chdir(current_dir)
     end
 
-    local tag = dep_type == "v"
+    if dep_version ~= "HEAD" then
+      local is_tag = dep_type == "v"
+      local fetch_target = is_tag and ("tag %s%s"):format(dep_type, dep_version) or dep_version
+      local checkout_target = is_tag and ("tags/%s%s"):format(dep_type, dep_version) or dep_version
 
-    ok, err =
-      run_command(("git fetch origin %s"):format((tag and ("tag %s%s"):format(dep_type, dep_version) or dep_version)))
-    assert_remove_file_or_dir(ok, folder_name)
-    mild_assert(ok, ("Failed to fetch commit or tag for '%s', confirm correct version"):format(folder_name))
+      local fetch_success = run_command(("git fetch origin %s"):format(fetch_target))
+      if not fetch_success then
+        remove_file_or_dir(abs_dep_path)
+        mild_assert(
+          false,
+          ("Failed to fetch %s for '%s'. Please verify the version exists."):format(
+            is_tag and "tag" or "commit",
+            dep_name
+          )
+        )
+      end
 
-    ok, err =
-      run_command(("git checkout %s"):format(tag and ("tags/%s%s"):format(dep_type, dep_version) or dep_version))
-    assert_remove_file_or_dir(ok, folder_name)
-    mild_assert(ok, ("Failed to checkout commit or tag for '%s', confirm correct version"):format(folder_name))
+      local checkout_success = run_command(("git checkout %s"):format(checkout_target))
+      if not checkout_success then
+        remove_file_or_dir(abs_dep_path)
+        mild_assert(
+          false,
+          ("Failed to checkout %s for '%s'. Please verify the version exists."):format(
+            is_tag and "tag" or "commit",
+            dep_name
+          )
+        )
+      end
+    end
 
     remove_file_or_dir(".git")
 
     lfs.chdir(package_dir)
   elseif dep_version ~= "HEAD" then
-    print(('Skipping package "%s", already exists'):format(folder_name))
+    print(('Skipping package "%s", already exists'):format(dep_name))
   end
+
+  lfs.chdir(original_dir)
 end
 
+---@param package_dir string
+---@param package Package
 local function clean(package_dir, package)
   print("Cleaning up unmarked packages...")
+
   if not package.dependencies then
     return
   end
-  local dependency_name = {}
-  for _, dep in ipairs(package.dependencies) do
-    local name = gen_dep_name(dep)
-    dependency_name[name] = true
+
+  local dependency_names = {}
+
+  -- Collect all dependency names (including transitive)
+  local function collect_dependencies(deps, current_package_dir)
+    for _, dep in ipairs(deps) do
+      local name = gen_dep_name(dep)
+      dependency_names[name] = true
+
+      -- Check for sub-dependencies
+      local dep_path = current_package_dir .. "/" .. name
+      if fs.isdir(dep_path) and fs.isfile(dep_path .. "/" .. NLPM_PACKAGE_FILE) then
+        local original_dir = lfs.currentdir()
+        lfs.chdir(ROOT_DIR)
+
+        local sub_require_path = (current_package_dir):sub(#ROOT_DIR + 2) .. "." .. name .. "." .. NLPM_PACKAGE_NAME
+        local sub_package_ok, sub_package = pcall(require, sub_require_path)
+
+        if sub_package_ok and sub_package.dependencies then
+          collect_dependencies(sub_package.dependencies, current_package_dir)
+        end
+
+        lfs.chdir(original_dir)
+      end
+    end
   end
+
+  collect_dependencies(package.dependencies, package_dir)
+
+  -- Remove unmarked packages
   local ok, err = lfs.chdir(package_dir)
   mild_assert(ok, err)
-  for k in pairs(dependency_name) do
-    ok, err = lfs.chdir(k)
-    mild_assert(ok, err)
-    if fs.isfile(nl_package_path) then
-      lfs.chdir(root_dir)
-      local sub_require_path = (package_dir):sub(#root_dir + 2) .. "." .. k .. "." .. nl_package_name
-      ---@type Package
-      local sub_package = require(sub_require_path)
-      if sub_package.dependencies then
-        for _, dep in ipairs(sub_package.dependencies) do
-          local name = gen_dep_name(dep)
-          dependency_name[name] = true
-        end
-      end
-    end
-    ok, err = lfs.chdir(package_dir)
-    mild_assert(ok, err)
-  end
+
   for path in lfs.dir(".") do
-    if path ~= "." and path ~= ".." then
-      if not dependency_name[path] then
-        print("Removing " .. fs.abspath(path))
-        remove_file_or_dir(fs.abspath(path))
-      end
+    if path ~= "." and path ~= ".." and not dependency_names[path] then
+      local abs_path = fs.abspath(path)
+      print("Removing " .. abs_path)
+      remove_file_or_dir(abs_path)
     end
   end
 end
 
-local function help()
-  print(([[Usage: nlpm [-h] <command> ...
+---@param package_dir string
+---@param script_command string
+local function run_with_nelua_path(package_dir, script_command)
+  local packages = get_packages(package_dir)
+  local all_paths = {}
 
-Options:
-   -h, --help           Show this help message and exit.
+  for _, path in ipairs(DEFAULT_NELUA_PATHS) do
+    table.insert(all_paths, path)
+  end
 
-Commands:
-   install              Installs all dependencies defined in your '%s' file into your nlpm_packages directory
-   clean                Removes any packages not listed in your '%s' file
-   script               Runs a script specified in your '%s' file
-   run                  Runs a command passed in as arguments from command line, pass -- as the next arg to stop nlpm from handling args
-   new                  Creates a new '%s' file in the current directory if no file is found
-   nuke                 Deletes the packages directory 
+  for _, path in ipairs(packages) do
+    table.insert(all_paths, path)
+  end
 
-Variables:
-   %s   Sets the directory where packages are installed
-   %s             Pass this to log what commands are being run and their outputs, the value isn't read, the variable just needs to exist
-]]):format(nl_package_path, nl_package_path, nl_package_path, nl_package_path, package_variable, log_variable))
-end
+  local nelua_path = table.concat(all_paths, ";")
+  local env_command = ("NELUA_PATH='%s' %s"):format(nelua_path, script_command)
 
-if #arg == 0 then
-  help()
-  os.exit(1)
-end
-
--- Ignore help if -- is specified with run
-if not (arg[1] and arg[1] == "run" and arg[2] and arg[2] == "--") then
-  for _, v in ipairs(arg) do
-    if v == "--help" or v == "-h" then
-      help()
-      os.exit()
-    end
+  local success = run_command(env_command)
+  if not success then
+    os.exit(1)
   end
 end
 
-local packages_dir = fs.abspath(os.getenv(package_variable) or "./nlpm_packages")
-
-if arg[1] == "install" then
-  mild_assert(fs.isfile(nl_package_path), "File, '" .. nl_package_path .. "', does not exist")
-  local package = require(nl_package_name)
-
-  if not fs.isdir(packages_dir) then
-    print("Packages directory, '" .. packages_dir .. " does not exist")
-    print("Creating '" .. packages_dir .. "'")
-    local ok, err = lfs.mkdir(packages_dir)
-    mild_assert(ok, err)
-  end
-
-  print("Installing packages...")
-  for _, dependency in ipairs(package.dependencies) do
-    install(packages_dir, dependency)
-  end
-  print("Done installing packages")
-
-  clean(packages_dir, package)
-  print("Done cleaning up")
-elseif arg[1] == "script" then
-  local package = require(nl_package_name)
-
-  local script_name = arg[2]
-  mild_assert(script_name, "`script` command requires a script name")
-
-  local script = package.scripts[script_name]
-  mild_assert(script, ("Script name, '%s', could not be found"):format(script_name))
-
-  local packages = get_packages(packages_dir)
-  os.execute(
-    ("NELUA_PATH='./?.nelua;./?/init.nelua;/usr/local/lib/nelua/lib/?.nelua;/usr/local/lib/nelua/lib/?/init.nelua;%s' %s"):format(
-      table.concat(packages, ";"),
-      script
-    )
-  )
-elseif arg[1] == "run" then
-  local command
-  if arg[2] == "--" then
-    mild_assert(arg[3], "`run` command requires an argument")
-    command = table.concat(arg, " ", 3)
-  else
-    mild_assert(arg[2], "`run` command requires an argument")
-    command = table.concat(arg, " ", 2)
-  end
-  local packages = get_packages(packages_dir)
-  os.execute(
-    ("NELUA_PATH='./?.nelua;./?/init.nelua;/usr/local/lib/nelua/lib/?.nelua;/usr/local/lib/nelua/lib/?/init.nelua;%s' %s"):format(
-      table.concat(packages, ";"),
-      command
-    )
-  )
-elseif arg[1] == "clean" then
-  clean(packages_dir, package)
-  print("Done cleaning up")
-elseif arg[1] == "new" then
-  mild_assert(not fs.isfile(nl_package_path), "File, '" .. nl_package_path .. "', already exists in this directory")
-  local file <close>, err = io.open(nl_package_path, "w")
-  mild_assert(file, err)
-  ---@diagnostic disable-next-line: need-check-nil, redefined-local
-  local written_file, err = file:write([[
+local function create_default_package_file()
+  local content = [[
 ---@class PackageDependency
 ---@field name string package name as it will be used in file gen
 ---@field repo string git repo
@@ -291,19 +289,221 @@ elseif arg[1] == "new" then
 
 ---@class Package
 ---@field dependencies? PackageDependency[] List of package dependencies
----@field scripts? table<string, string> scripts that can be called with `nlpm run`
+---@field scripts? table<string, string> scripts that can be called with `nlpm script`
 
 ---@type Package
 return {
   dependencies = {},
   scripts = {}
-}]])
+}]]
 
-  mild_assert(written_file, err)
-  print(nl_package_path .. " successfully created")
-elseif arg[1] == "nuke" then
-  remove_file_or_dir(packages_dir)
-  print("Removed '" .. packages_dir .. "' directory")
-else
-  io.stderr:write("Unkown command " .. arg[1] .. "\n")
+  local file, err = io.open(NLPM_PACKAGE_FILE, "w")
+  mild_assert(file, ("Failed to create %s: %s"):format(NLPM_PACKAGE_FILE, err or "unknown error"))
+
+  ---@diagnostic disable-next-line: need-check-nil
+  local written, write_err = file:write(content)
+  mild_assert(written, ("Failed to write to %s: %s"):format(NLPM_PACKAGE_FILE, write_err or "unknown error"))
+
+  ---@diagnostic disable-next-line: need-check-nil
+  file:close()
+  print(NLPM_PACKAGE_FILE .. " successfully created")
 end
+
+local function update_gitignore()
+  local packages_dir_name = "nlpm_packages"
+
+  if fs.isfile(GITIGNORE) then
+    local file, err = io.open(GITIGNORE, "r")
+    mild_assert(file, err)
+
+    ---@diagnostic disable-next-line: need-check-nil
+    local content = file:read("a")
+    ---@diagnostic disable-next-line: need-check-nil
+    file:close()
+
+    if content:match(packages_dir_name) then
+      return -- Already in gitignore
+    end
+
+    file, err = io.open(GITIGNORE, "a")
+    mild_assert(file, err)
+
+    ---@diagnostic disable-next-line: need-check-nil
+    local written, write_err = file:write("\n" .. packages_dir_name)
+    mild_assert(written, write_err)
+
+    ---@diagnostic disable-next-line: need-check-nil
+    file:close()
+    print("Appended '" .. packages_dir_name .. "' to .gitignore")
+  else
+    local file, err = io.open(GITIGNORE, "w")
+    mild_assert(file, err)
+
+    ---@diagnostic disable-next-line: need-check-nil
+    local written, write_err = file:write(packages_dir_name)
+    mild_assert(written, write_err)
+
+    ---@diagnostic disable-next-line: need-check-nil
+    file:close()
+    print("Created .gitignore file")
+  end
+end
+
+local function help()
+  print(
+    ([[
+Usage: nlpm [-h] <command> ...
+
+Options:
+   -h, --help            Show this help message and exit
+
+Commands:
+   install               Install all dependencies from '%s'
+   clean                 Remove packages not listed in '%s'
+   script <name>         Run a script from '%s'
+   run [--] <command>    Run command with Nelua path set up
+   new                   Create a new '%s' in the current directory
+   nuke                  Delete the packages directory
+
+Environment Variables:
+   %s    Directory for package installation (default: ./nlpm_packages)
+   %s              Enable command logging (any value)
+]]):format(
+      NLPM_PACKAGE_FILE,
+      NLPM_PACKAGE_FILE,
+      NLPM_PACKAGE_FILE,
+      NLPM_PACKAGE_NAME,
+      NLPM_PACKAGE_VARIABLE,
+      NLPM_LOG_VARIABLE
+    )
+  )
+end
+
+local commands = {}
+
+---@param packages_dir string
+function commands.install(packages_dir)
+  mild_assert(
+    fs.isfile(NLPM_PACKAGE_FILE),
+    ("Package file '%s' not found. Run 'nlpm new' to create one."):format(NLPM_PACKAGE_FILE)
+  )
+
+  local package_ok, package = pcall(require, NLPM_PACKAGE_NAME)
+  mild_assert(package_ok, ("Failed to load package file: %s"):format(package or "unknown error"))
+  mild_assert(package.dependencies, "Package file must contain a 'dependencies' field")
+
+  if not fs.isdir(packages_dir) then
+    print("Creating packages directory: " .. packages_dir)
+    local ok, err = lfs.mkdir(packages_dir)
+    mild_assert(ok, ("Failed to create packages directory: %s"):format(err or "unknown error"))
+  end
+
+  print("Installing packages...")
+  for _, dependency in ipairs(package.dependencies) do
+    install(packages_dir, dependency, false)
+  end
+  print("Installation complete")
+
+  clean(packages_dir, package)
+  print("Cleanup complete")
+end
+
+---@param packages_dir string
+---@param script_name string
+function commands.script(packages_dir, script_name)
+  mild_assert(script_name, "Script name is required")
+  mild_assert(fs.isfile(NLPM_PACKAGE_FILE), ("Package file '%s' not found"):format(NLPM_PACKAGE_FILE))
+
+  local package_ok, package = pcall(require, NLPM_PACKAGE_NAME)
+  mild_assert(package_ok, ("Failed to load package file: %s"):format(package or "unknown error"))
+  mild_assert(package.scripts, "Package file must contain a 'scripts' field")
+
+  local script = package.scripts[script_name]
+  mild_assert(script, ("Script '%s' not found in package file"):format(script_name))
+
+  run_with_nelua_path(packages_dir, script)
+end
+
+---@param packages_dir string
+---@param args string[]
+---@param start_index integer
+function commands.run(packages_dir, args, start_index)
+  local command = table.concat(args, " ", start_index)
+  mild_assert(command ~= "", "Command is required")
+
+  run_with_nelua_path(packages_dir, command)
+end
+
+---@param packages_dir string
+function commands.clean(packages_dir)
+  mild_assert(fs.isfile(NLPM_PACKAGE_FILE), ("Package file '%s' not found"):format(NLPM_PACKAGE_FILE))
+
+  local package_ok, package = pcall(require, NLPM_PACKAGE_NAME)
+  mild_assert(package_ok, ("Failed to load package file: %s"):format(package or "unknown error"))
+
+  clean(packages_dir, package)
+  print("Cleanup complete")
+end
+
+function commands.new()
+  mild_assert(not fs.isfile(NLPM_PACKAGE_FILE), ("Package file '%s' already exists"):format(NLPM_PACKAGE_FILE))
+
+  create_default_package_file()
+  update_gitignore()
+end
+
+---@param packages_dir string
+function commands.nuke(packages_dir)
+  if fs.isdir(packages_dir) then
+    remove_file_or_dir(packages_dir)
+    print("Removed packages directory: " .. packages_dir)
+  else
+    print("Packages directory does not exist: " .. packages_dir)
+  end
+end
+
+---@param args string[]
+local function main(args)
+  if #args == 0 then
+    help()
+    os.exit(1)
+  end
+
+  local command = args[1]
+
+  -- Handle help flags (except for run command with --)
+  if not (command == "run" and args[2] == "--") then
+    for _, arg in ipairs(args) do
+      if arg == "--help" or arg == "-h" then
+        help()
+        os.exit(0)
+      end
+    end
+  end
+
+  local packages_dir = fs.abspath(os.getenv(NLPM_PACKAGE_VARIABLE) or "./nlpm_packages")
+
+  if command == "install" then
+    commands.install(packages_dir)
+  elseif command == "script" then
+    commands.script(packages_dir, args[2])
+  elseif command == "run" then
+    local start_index = (args[2] == "--") and 3 or 2
+    mild_assert(args[start_index], "Command is required after 'run'")
+    commands.run(packages_dir, args, start_index)
+  elseif command == "clean" then
+    commands.clean(packages_dir)
+  elseif command == "new" then
+    commands.new()
+  elseif command == "nuke" then
+    commands.nuke(packages_dir)
+  else
+    io.stderr:write("Unknown command: " .. command .. "\n")
+    io.stderr:write("Run 'nlpm --help' for usage information.\n")
+    os.exit(1)
+  end
+end
+
+main(arg)
+
+return main
