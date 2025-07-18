@@ -34,7 +34,7 @@ local function run_command(cmd)
     end
     return os.execute(cmd .. " > NUL 2>&1")
   end
-  print(cmd)
+  print("COMMAND: " .. cmd)
   return os.execute(cmd)
 end
 
@@ -56,6 +56,12 @@ local function remove_file_or_dir(path)
     lfs.rmdir(path)
   else
     os.remove(path)
+  end
+end
+
+local function assert_remove_file_or_dir(ok, path)
+  if not ok then
+    remove_file_or_dir(path)
   end
 end
 
@@ -96,15 +102,17 @@ local function install(package_dir, dependency, depth)
   local ok, err = lfs.chdir(package_dir)
   mild_assert(ok, err)
   local folder_name, dep_type, dep_version = gen_dep_name(dependency)
-  if dep_version == "HEAD" and fs.isdir(folder_name) and not depth then
-    remove_file_or_dir(folder_name)
-  end
+  assert_remove_file_or_dir(not (dep_version == "HEAD" and fs.isdir(folder_name) and not depth), folder_name)
   if not fs.isdir(folder_name) then
     print(('Installing pacakage "%s"...'):format(folder_name))
+
     ok, err = run_command(("git clone --depth 1 %s %s "):format(dependency.repo, folder_name))
-    mild_assert(ok, ("Failed to clone repo for '%s', confirm correct repo"):format(folder_name))
+    assert_remove_file_or_dir(ok, folder_name)
+    mild_assert(ok, ("Failed to clone repo for '%s', confirm correct repo url"):format(folder_name))
+
     ok, err = lfs.chdir(folder_name)
     mild_assert(ok, err)
+
     if fs.isfile(nl_package_path) then
       local current_dir = lfs.currentdir()
       lfs.chdir(root_dir)
@@ -118,15 +126,21 @@ local function install(package_dir, dependency, depth)
       end
       lfs.chdir(current_dir)
     end
+
     local tag = dep_type == "v"
+
     ok, err =
       run_command(("git fetch origin %s"):format((tag and ("tag %s%s"):format(dep_type, dep_version) or dep_version)))
+    assert_remove_file_or_dir(ok, folder_name)
     mild_assert(ok, ("Failed to fetch commit or tag for '%s', confirm correct version"):format(folder_name))
+
     ok, err =
       run_command(("git checkout %s"):format(tag and ("tags/%s%s"):format(dep_type, dep_version) or dep_version))
+    assert_remove_file_or_dir(ok, folder_name)
     mild_assert(ok, ("Failed to checkout commit or tag for '%s', confirm correct version"):format(folder_name))
-    mild_assert(ok, err)
+
     remove_file_or_dir(".git")
+
     lfs.chdir(package_dir)
   elseif dep_version ~= "HEAD" then
     print(('Skipping package "%s", already exists'):format(folder_name))
