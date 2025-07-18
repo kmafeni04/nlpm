@@ -1,3 +1,79 @@
 # nlpm (NeLua Package Manager)
 
-Dependency manager for nelua 
+Package manager for Nelua projects
+
+## Requirements
+- [nelua](https://nelua.io)
+- [git](https://git-scm.com/)
+
+## Installation
+- Clone the repo
+```sh
+git clone https://github.com/kmafeni04/nlpm
+```
+
+- `cd` into the folder
+```sh
+cd nlpm
+```
+
+- Run `nlpm`
+```sh
+./nlpm
+```
+
+
+## Package Structure
+
+### Example
+```lua
+---@class PackageDependency
+---@field name string package name as it will be used in file gen
+---@field repo string git repo
+---@field version? string git hash(#) or tag(v), defaults to "#HEAD"
+
+---@class Package
+---@field dependencies? PackageDependency[] List of package dependencies
+---@field scripts? table<string, string> scripts that can be called with `nlpm script`
+
+---@type Package
+return {
+  dependencies = {
+    { name = "example1", repo = "https://github.com/user/mylib.git", version = "vCOMMIT_TAG" },
+    { name = "example2", repo = "https://git.example.com/other.git", version = "#COMMIT_HASH" },
+    { name = "example3", repo = "https://git.example.com/other.git" }, -- defaults to HEAD
+  },
+  scripts = {
+    build = "nelua -r src/main.nelua -o build/app",
+    test  = "nelua --cc=tcc test",
+  }
+}
+```
+### PackageDependency
+- **name**: `string` - The name of the package as it will be used in file generation.
+- **repo**: `string` - The Git repository URL of the package.
+- **version**: `string?` - The Git hash (`#`) or tag (`v`) of the package. Defaults to `#HEAD`.
+
+### Package
+- **dependencies**: `PackageDependency[]?` - A list of package dependencies.
+- **scripts**: `table<string, string>?` - Scripts that can be called with `nlpm script`.
+
+## Usage
+```bash
+nlpm [-h] <command> ...
+```
+
+### Options
+- `-h, --help`: Show help message and exit.
+
+### Commands
+- `install`: Install all dependencies from the package file.
+- `clean`: Remove packages not listed in the package file.
+- `script <name>`: Run a script defined in the package file.
+- `run [--] <command>`: Run a command with the nlpm Nelua path set up.
+- `new`: Create a new package in the current directory.
+- `nuke`: Delete the packages directory.
+
+### Environment Variables
+- `NLPM_PACKAGES_PATH`: Directory for package installation (default: `./nlpm_packages`).
+- `NLPM_LOG`: Enable logging of shell commands and their outputs (any value).
