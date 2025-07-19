@@ -14,7 +14,7 @@ local NLPM_PACKAGE_NAME <const> = "nlpm_package"
 local NLPM_PACKAGE_FILE <const> = NLPM_PACKAGE_NAME .. ".lua"
 local NLPM_PACKAGE_VARIABLE <const> = "NLPM_PACKAGES_PATH"
 local NLPM_LOG_VARIABLE <const> = "NLPM_LOG"
-local NLPM_LOG_ENABLED <const> = os.getenv(NLPM_LOG_VARIABLE)
+local NLPM_LOG_ENABLED <const> = (os.getenv(NLPM_LOG_VARIABLE)) ~= nil
 local ROOT_DIR <const> = lfs.currentdir()
 local GITIGNORE <const> = ".gitignore"
 local ON_WINDOWS <const> = package.config:sub(1, 1) == "\\"
@@ -25,13 +25,6 @@ local DEFAULT_NELUA_PATHS <const> = {
   "/usr/local/lib/nelua/lib/?.nelua",
   "/usr/local/lib/nelua/lib/?/init.nelua",
 }
-
---NOTE: Might use later but really on the fence about this
-local function log(message)
-  if NLPM_LOG_ENABLED then
-    print("[LOG] " .. message)
-  end
-end
 
 ---@param ok any
 ---@param err string?
@@ -45,14 +38,15 @@ local function mild_assert(ok, err)
 end
 
 ---@param cmd string
+---@param log boolean?
 ---@return boolean? success
-local function run_command(cmd)
-  log("Executing: " .. cmd)
+local function run_command(cmd, log)
   local result
-  if not NLPM_LOG_ENABLED then
-    result = os.execute(ON_WINDOWS and cmd .. " > NUL 2>&1" or cmd .. " > /dev/null 2>&1")
-  else
+  if NLPM_LOG_ENABLED or log then
+    print("EXECUTING: " .. cmd .. "\n")
     result = os.execute(cmd)
+  else
+    result = os.execute(ON_WINDOWS and cmd .. " > NUL 2>&1" or cmd .. " > /dev/null 2>&1")
   end
   return result
 end
@@ -274,7 +268,7 @@ local function run_with_nelua_path(package_dir, script_command)
   local nelua_path = table.concat(all_paths, ";")
   local env_command = ("NELUA_PATH='%s' %s"):format(nelua_path, script_command)
 
-  local success = run_command(env_command)
+  local success = run_command(env_command, true)
   if not success then
     os.exit(1)
   end
@@ -421,6 +415,7 @@ function commands.script(packages_dir, script_name)
   local script = package.scripts[script_name]
   mild_assert(script, ("Script '%s' not found in package file"):format(script_name))
 
+  print("Running script: " .. script_name)
   run_with_nelua_path(packages_dir, script)
 end
 
