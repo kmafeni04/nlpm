@@ -13,8 +13,6 @@ local lfs = require("lfs")
 local NLPM_PACKAGE_NAME <const> = "nlpm_package"
 local NLPM_PACKAGE_FILE <const> = NLPM_PACKAGE_NAME .. ".lua"
 local NLPM_PACKAGE_VARIABLE <const> = "NLPM_PACKAGES_PATH"
-local NLPM_LOG_VARIABLE <const> = "NLPM_LOG"
-local NLPM_LOG_ENABLED <const> = (os.getenv(NLPM_LOG_VARIABLE)) ~= nil
 local ROOT_DIR <const> = lfs.currentdir()
 local GITIGNORE <const> = ".gitignore"
 local ON_WINDOWS <const> = package.config:sub(1, 1) == "\\"
@@ -25,6 +23,8 @@ local DEFAULT_NELUA_PATHS <const> = {
   "/usr/local/lib/nelua/lib/?.nelua",
   "/usr/local/lib/nelua/lib/?/init.nelua",
 }
+
+local log = false
 
 ---@param ok any
 ---@param err string?
@@ -37,16 +37,16 @@ local function mild_assert(ok, err)
   end
 end
 
----@param cmd string
----@param log boolean?
+---@param cmd_to_run string
+---@param cmd_to_log string?
 ---@return boolean? success
-local function run_command(cmd, log)
+local function run_command(cmd_to_run, cmd_to_log)
   local result
-  if NLPM_LOG_ENABLED or log then
-    print("EXECUTING: " .. cmd .. "\n")
-    result = os.execute(cmd)
+  if log then
+    print("RUNNING: " .. (cmd_to_log and cmd_to_log or cmd_to_run) .. "\n")
+    result = os.execute(cmd_to_run)
   else
-    result = os.execute(ON_WINDOWS and cmd .. " > NUL 2>&1" or cmd .. " > /dev/null 2>&1")
+    result = os.execute(ON_WINDOWS and cmd_to_run .. " > NUL 2>&1" or cmd_to_run .. " > /dev/null 2>&1")
   end
   return result
 end
@@ -251,10 +251,10 @@ local function clean(package_dir, package)
   end
 end
 
----@param package_dir string
----@param script_command string
-local function run_with_nelua_path(package_dir, script_command)
-  local packages = get_packages(package_dir)
+---@param packages_dir string
+---@return string
+local function make_nelua_path(packages_dir)
+  local packages = get_packages(packages_dir)
   local all_paths = {}
 
   for _, path in ipairs(DEFAULT_NELUA_PATHS) do
@@ -266,9 +266,17 @@ local function run_with_nelua_path(package_dir, script_command)
   end
 
   local nelua_path = table.concat(all_paths, ";")
+  return nelua_path
+end
+
+---@param packages_dir string
+---@param script_command string
+local function run_with_nelua_path(packages_dir, script_command)
+  local nelua_path = make_nelua_path(packages_dir)
   local env_command = ("NELUA_PATH='%s' %s"):format(nelua_path, script_command)
 
-  local success = run_command(env_command, true)
+  log = true
+  local success = run_command(env_command, script_command)
   if not success then
     os.exit(1)
   end
@@ -344,33 +352,25 @@ local function update_gitignore()
 end
 
 local function help()
-  print(
-    ([[
-Usage: nlpm [-h] <command> ...
+  print(([[
+Usage: nlpm [-h] [--print-nelua-path] [--log] <command> ...
 
 Options:
    -h, --help            Show this help message and exit
+   --print-nelua-path    Print the nlpm 'NELUA_PATH'
+   --log                 Enable command logging 
 
 Commands:
    install               Install all dependencies from '%s'
    clean                 Remove packages not listed in '%s'
-   script <name>         Run a script from '%s' the nlpm nelua path set up
-   run [--] <command>    Run command with nelua path set up
+   script <name>         Run a script from '%s' with the nlpm 'NELUA_PATH'
+   run [--] <command>    Run command with the nlpm 'NELUA_PATH'
    new                   Create a new '%s' in the current directory
    nuke                  Delete the packages directory
 
 Environment Variables:
    %s    Directory for package installation (default: ./nlpm_packages)
-   %s              Enable command logging (any value)
-]]):format(
-      NLPM_PACKAGE_FILE,
-      NLPM_PACKAGE_FILE,
-      NLPM_PACKAGE_FILE,
-      NLPM_PACKAGE_NAME,
-      NLPM_PACKAGE_VARIABLE,
-      NLPM_LOG_VARIABLE
-    )
-  )
+]]):format(NLPM_PACKAGE_FILE, NLPM_PACKAGE_FILE, NLPM_PACKAGE_FILE, NLPM_PACKAGE_NAME, NLPM_PACKAGE_VARIABLE))
 end
 
 local commands = {}
@@ -466,17 +466,19 @@ local function main(args)
 
   local command = args[1]
 
-  -- Handle help flags (except for run command with --)
-  if not (command == "run" and args[2] == "--") then
-    for _, arg in ipairs(args) do
-      if arg == "--help" or arg == "-h" then
-        help()
-        os.exit(0)
-      end
+  local packages_dir = fs.abspath(os.getenv(NLPM_PACKAGE_VARIABLE) or "./nlpm_packages")
+
+  for _, arg in ipairs(args) do
+    -- Handle help flags (except for run command with --)
+    if not (command == "run" and args[2] == "--") and (arg == "--help" or arg == "-h") then
+      help()
+      os.exit(0)
+    elseif arg == "--print-nelua-path" then
+      print("NELUA_PATH: " .. make_nelua_path(packages_dir))
+    elseif arg == "--log" then
+      log = true
     end
   end
-
-  local packages_dir = fs.abspath(os.getenv(NLPM_PACKAGE_VARIABLE) or "./nlpm_packages")
 
   if command == "install" then
     commands.install(packages_dir)
@@ -492,13 +494,15 @@ local function main(args)
     commands.new()
   elseif command == "nuke" then
     commands.nuke(packages_dir)
+  elseif command == "--print-nelua-path" or command == "--log" and #args < 2 then
+    io.stderr:write("No command Passed\n")
+    help()
+    os.exit(1)
   else
-    io.stderr:write("Unknown command: " .. command .. "\n")
-    io.stderr:write("Run 'nlpm --help' for usage information.\n")
+    io.stderr:write("Unknown command: '" .. command .. "'\n")
+    help()
     os.exit(1)
   end
 end
 
 main(arg)
-
-return main
