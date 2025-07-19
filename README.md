@@ -2,6 +2,10 @@
 
 Package manager for Nelua projects
 
+## WARNING
+
+When using this, you need to run your nelua code with either the `script` or `run` command as that's the only way for the `NELUA_PATH` to be set correctly.
+
 ## Requirements
 - [nelua](https://nelua.io)
 - [git](https://git-scm.com/)
@@ -21,7 +25,6 @@ cd nlpm
 ```sh
 ./nlpm
 ```
-
 
 ## Package Structure
 
@@ -69,11 +72,12 @@ nlpm [-h] <command> ...
 ### Commands
 - `install`: Install all dependencies from the package file.
 - `clean`: Remove packages not listed in the package file.
-- `script <name>`: Run a script defined in the package file.
-- `run [--] <command>`: Run a command with the nlpm Nelua path set up.
+- `script <name>`: Run a script defined in the package file with the nlpm nelua path set up.
+- `run [--] <command>`: Run a command with the nlpm nelua path set up.
 - `new`: Create a new package in the current directory.
 - `nuke`: Delete the packages directory.
 
 ### Environment Variables
 - `NLPM_PACKAGES_PATH`: Directory for package installation (default: `./nlpm_packages`).
 - `NLPM_LOG`: Enable logging of shell commands and their outputs (any value).
+

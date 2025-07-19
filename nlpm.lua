@@ -360,8 +360,8 @@ Options:
 Commands:
    install               Install all dependencies from '%s'
    clean                 Remove packages not listed in '%s'
-   script <name>         Run a script from '%s'
-   run [--] <command>    Run command with Nelua path set up
+   script <name>         Run a script from '%s' the nlpm nelua path set up
+   run [--] <command>    Run command with nelua path set up
    new                   Create a new '%s' in the current directory
    nuke                  Delete the packages directory
 
