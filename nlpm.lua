@@ -85,6 +85,8 @@ local function get_packages(package_dir)
         local abs_path = fs.abspath(package_dir .. "/" .. package)
         table.insert(packages, abs_path .. "/?.nelua")
         table.insert(packages, abs_path .. "/?/init.nelua")
+        table.insert(packages, abs_path .. "/?.lua")
+        table.insert(packages, abs_path .. "/?/init.lua")
       end
     end
   end
@@ -253,7 +255,7 @@ end
 
 ---@param packages_dir string
 ---@return string
-local function make_nelua_path(packages_dir)
+local function make_nlpm_path(packages_dir)
   local packages = get_packages(packages_dir)
   local all_paths = {}
 
@@ -272,8 +274,8 @@ end
 ---@param packages_dir string
 ---@param script_command string
 local function run_with_nelua_path(packages_dir, script_command)
-  local nelua_path = make_nelua_path(packages_dir)
-  local env_command = ("NELUA_PATH='%s' %s"):format(nelua_path, script_command)
+  local nlpm_path = make_nlpm_path(packages_dir)
+  local env_command = ("LUA_PATH='$LUA_PATH;%s' NELUA_PATH='%s' %s"):format(nlpm_path, nlpm_path, script_command)
 
   log = true
   local success = run_command(env_command, script_command)
@@ -353,18 +355,18 @@ end
 
 local function help()
   print(([[
-Usage: nlpm [-h] [--print-nelua-path] [--log] <command> ...
+Usage: nlpm [-h] [--print-nlpm-path] [--log] <command> ...
 
 Options:
    -h, --help            Show this help message and exit
-   --print-nelua-path    Print the nlpm 'NELUA_PATH'
+   --print-nlpm-path     Print the nlpm path set for 'NELUA_PATH' and 'LUA_PATH'
    --log                 Enable command logging 
 
 Commands:
    install               Install all dependencies from '%s'
    clean                 Remove packages not listed in '%s'
-   script <name>         Run a script from '%s' with the nlpm 'NELUA_PATH'
-   run [--] <command>    Run command with the nlpm 'NELUA_PATH'
+   script <name>         Run a script from '%s' with the nlpm 'NELUA_PATH' and 'LUA_PATH'
+   run [--] <command>    Run command with the nlpm 'NELUA_PATH' and 'LUA_PATH'
    new                   Create a new '%s' in the current directory
    nuke                  Delete the packages directory
 
@@ -473,8 +475,8 @@ local function main(args)
     if not (command == "run" and args[2] == "--") and (arg == "--help" or arg == "-h") then
       help()
       os.exit(0)
-    elseif arg == "--print-nelua-path" then
-      print("NELUA_PATH: " .. make_nelua_path(packages_dir))
+    elseif arg == "--print-nlpm-path" then
+      print("NLPM_PATH: " .. make_nlpm_path(packages_dir))
     elseif arg == "--log" then
       log = true
     end
@@ -494,7 +496,7 @@ local function main(args)
     commands.new()
   elseif command == "nuke" then
     commands.nuke(packages_dir)
-  elseif command == "--print-nelua-path" or command == "--log" and #args < 2 then
+  elseif command == "--print-nlpm-path" or command == "--log" and #args < 2 then
     io.stderr:write("No command Passed\n")
     help()
     os.exit(1)
