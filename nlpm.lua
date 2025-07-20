@@ -32,7 +32,7 @@ local function mild_assert(ok, err)
   if not ok then
     local info = debug.getinfo(2)
     local error_msg = err or ("Assertion failed: %s:%s"):format(info.source, info.currentline)
-    io.stderr:write("Error: " .. error_msg .. "\n")
+    io.stderr:write("ERROR: " .. error_msg .. "\n")
     os.exit(1)
   end
 end
@@ -415,7 +415,7 @@ function commands.script(packages_dir, script_name)
   local script = package.scripts[script_name]
   mild_assert(script, ("Script '%s' not found in package file"):format(script_name))
 
-  print("Running script: " .. script_name)
+  print("SCRIPT: " .. script_name)
   run_with_nelua_path(packages_dir, script)
 end
 
