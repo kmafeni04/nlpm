@@ -63,11 +63,13 @@ return {
 
 ## Usage
 ```bash
-nlpm [-h] <command> ...
+nlpm [-h] [--print-nelua-path] [--log] <command> ...
 ```
 
 ### Options
 - `-h, --help`: Show help message and exit.
+- `--print-nelua-path`: Print the nlpm 'NELUA_PATH'
+- `--log`: Enable command logging 
 
 ### Commands
 - `install`: Install all dependencies from the package file.
@@ -79,5 +81,3 @@ nlpm [-h] <command> ...
 
 ### Environment Variables
 - `NLPM_PACKAGES_PATH`: Directory for package installation (default: `./nlpm_packages`).
-- `NLPM_LOG`: Enable logging of shell commands and their outputs (any value).
-
