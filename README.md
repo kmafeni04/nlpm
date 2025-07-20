@@ -76,8 +76,8 @@ nlpm [-h] [--print-nlpm-path] [--log] <command> ...
 ### Commands
 - `install`: Install all dependencies from the package file.
 - `clean`: Remove packages not listed in the package file.
-- `script <name>`: Run a script defined in the package file with the nlpm nelua path set up.
-- `run [--] <command>`: Run a command with the nlpm nelua path set up.
+- `script <name>`: Run a script defined in the package file with the nlpm 'NELUA_PATH' and 'LUA_PATH' set up.
+- `run [--] <command>`: Run a command with the nlpm 'NELUA_PATH' and 'LUA_PATH' set up.
 - `new`: Create a new package in the current directory.
 - `nuke`: Delete the packages directory.
 
