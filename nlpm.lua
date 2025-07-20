@@ -77,20 +77,22 @@ end
 
 ---@param package_dir string
 ---@return string[]
-local function get_packages(package_dir)
-  local packages = {}
+---@return string[]
+local function get_package_paths(package_dir)
+  local nelua_package_paths = {}
+  local lua_package_paths = {}
   if fs.isdir(package_dir) then
     for package in lfs.dir(package_dir) do
       if package ~= "." and package ~= ".." then
         local abs_path = fs.abspath(package_dir .. "/" .. package)
-        table.insert(packages, abs_path .. "/?.nelua")
-        table.insert(packages, abs_path .. "/?/init.nelua")
-        table.insert(packages, abs_path .. "/?.lua")
-        table.insert(packages, abs_path .. "/?/init.lua")
+        table.insert(nelua_package_paths, abs_path .. "/?.nelua")
+        table.insert(nelua_package_paths, abs_path .. "/?/init.nelua")
+        table.insert(lua_package_paths, abs_path .. "/?.lua")
+        table.insert(lua_package_paths, abs_path .. "/?/init.lua")
       end
     end
   end
-  return packages
+  return nelua_package_paths, lua_package_paths
 end
 
 ---@param dependency PackageDependency
@@ -255,27 +257,29 @@ end
 
 ---@param packages_dir string
 ---@return string
+---@return string
 local function make_nlpm_path(packages_dir)
-  local packages = get_packages(packages_dir)
-  local all_paths = {}
+  local nelua_package_paths, lua_package_paths = get_package_paths(packages_dir)
+  local all_nelua_paths = {}
 
   for _, path in ipairs(DEFAULT_NELUA_PATHS) do
-    table.insert(all_paths, path)
+    table.insert(all_nelua_paths, path)
   end
 
-  for _, path in ipairs(packages) do
-    table.insert(all_paths, path)
+  for _, path in ipairs(nelua_package_paths) do
+    table.insert(all_nelua_paths, path)
   end
 
-  local nelua_path = table.concat(all_paths, ";")
-  return nelua_path
+  local nelua_path = table.concat(all_nelua_paths, ";")
+  local lua_path = table.concat(lua_package_paths, ";")
+  return nelua_path, lua_path
 end
 
 ---@param packages_dir string
 ---@param script_command string
 local function run_with_nelua_path(packages_dir, script_command)
-  local nlpm_path = make_nlpm_path(packages_dir)
-  local env_command = ("LUA_PATH='$LUA_PATH;%s' NELUA_PATH='%s' %s"):format(nlpm_path, nlpm_path, script_command)
+  local nelua_path, lua_path = make_nlpm_path(packages_dir)
+  local env_command = ("LUA_PATH='$LUA_PATH;%s' NELUA_PATH='%s' %s"):format(lua_path, nelua_path, script_command)
 
   log = true
   local success = run_command(env_command, script_command)
@@ -357,6 +361,9 @@ local function help()
   print(([[
 Usage: nlpm [-h] [--print-nlpm-path] [--log] <command> ...
 
+Arguments:
+  runargs                Arguments passed to the run command
+                         Use '--' to avoid conflicts with regular commands and options
 Options:
    -h, --help            Show this help message and exit
    --print-nlpm-path     Print the nlpm path set for 'NELUA_PATH' and 'LUA_PATH'
@@ -366,7 +373,7 @@ Commands:
    install               Install all dependencies from '%s'
    clean                 Remove packages not listed in '%s'
    script <name>         Run a script from '%s' with the nlpm 'NELUA_PATH' and 'LUA_PATH'
-   run [--] <command>    Run command with the nlpm 'NELUA_PATH' and 'LUA_PATH'
+   run [--] <runargs>    Run shell commands with the nlpm 'NELUA_PATH' and 'LUA_PATH'
    new                   Create a new '%s' in the current directory
    nuke                  Delete the packages directory
 
@@ -470,15 +477,28 @@ local function main(args)
 
   local packages_dir = fs.abspath(os.getenv(NLPM_PACKAGE_VARIABLE) or "./nlpm_packages")
 
-  for _, arg in ipairs(args) do
+  for i, arg in ipairs(args) do
     -- Handle help flags (except for run command with --)
-    if not (command == "run" and args[2] == "--") and (arg == "--help" or arg == "-h") then
-      help()
-      os.exit(0)
-    elseif arg == "--print-nlpm-path" then
-      print("NLPM_PATH: " .. make_nlpm_path(packages_dir))
-    elseif arg == "--log" then
-      log = true
+    if not (command == "run" and args[2] == "--") then
+      if arg == "--help" or arg == "-h" then
+        help()
+        os.exit(0)
+      elseif arg == "--print-nlpm-path" then
+        local nelua_path, lua_path = make_nlpm_path(packages_dir)
+        print("NLPM_NELUA_PATH: '" .. nelua_path .. "'\n")
+        print("NLPM_LUA_PATH: '" .. lua_path .. "'")
+        os.exit(0)
+      elseif arg == "--log" then
+        log = true
+        local sub_args = {}
+        for j = 1, #args do
+          if j ~= i then
+            table.insert(sub_args, args[j])
+          end
+        end
+        main(sub_args)
+        os.exit(0)
+      end
     end
   end
 
@@ -496,10 +516,6 @@ local function main(args)
     commands.new()
   elseif command == "nuke" then
     commands.nuke(packages_dir)
-  elseif command == "--print-nlpm-path" or command == "--log" and #args < 2 then
-    io.stderr:write("No command Passed\n")
-    help()
-    os.exit(1)
   else
     io.stderr:write("Unknown command: '" .. command .. "'\n")
     help()

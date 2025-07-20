@@ -65,6 +65,8 @@ return {
 ```bash
 nlpm [-h] [--print-nlpm-path] [--log] <command> ...
 ```
+### Arguements
+- `runargs`: Arguments passed to the run command, use `--` to avoid conflicts with regular commands and options
 
 ### Options
 - `-h, --help`: Show help message and exit.
