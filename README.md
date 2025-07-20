@@ -4,7 +4,7 @@ Package manager for Nelua projects
 
 ## WARNING
 
-When using this, you need to run your nelua code with either the `script` or `run` command as that's the only way for the `NELUA_PATH` to be set correctly.
+When using this, you need to run your nelua code with either the `script` or `run` command as that's the only way for the `NELUA_PATH` and `LUA_PATH` to be set correctly.
 
 ## Requirements
 - [nelua](https://nelua.io)
@@ -63,12 +63,12 @@ return {
 
 ## Usage
 ```bash
-nlpm [-h] [--print-nelua-path] [--log] <command> ...
+nlpm [-h] [--print-nlpm-path] [--log] <command> ...
 ```
 
 ### Options
 - `-h, --help`: Show help message and exit.
-- `--print-nelua-path`: Print the nlpm 'NELUA_PATH'
+- `--print-nlpm-path`: Print the nlpm 'NELUA_PATH' and 'LUA_PATH'
 - `--log`: Enable command logging 
 
 ### Commands
