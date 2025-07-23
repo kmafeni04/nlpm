@@ -16,6 +16,7 @@ local NLPM_PACKAGE_NAME <const> = "nlpm_package"
 local NLPM_PACKAGE_FILE <const> = NLPM_PACKAGE_NAME .. ".lua"
 local NLPM_PACKAGE_VARIABLE <const> = "NLPM_PACKAGES_PATH"
 local ROOT_DIR <const> = lfs.currentdir()
+local NLPM_PACKAGES = "nlpm_packages"
 local GITIGNORE <const> = ".gitignore"
 
 local DEFAULT_NELUA_PATHS <const> = {
@@ -215,13 +216,14 @@ local function clean(package_dir, package)
     return
   end
 
-  local dependency_names = {}
-
-  -- Collect all dependency names (including transitive)
-  local function collect_dependencies(deps, current_package_dir)
+  --- Collect all dependency names
+  ---@param deps PackageDependency[]
+  ---@param current_package_dir string
+  ---@param names {string: boolean}
+  local function collect_dependencies(deps, current_package_dir, names)
     for _, dep in ipairs(deps) do
       local name = gen_dep_name(dep)
-      dependency_names[name] = true
+      names[name] = true
 
       -- Check for sub-dependencies
       local dep_path = current_package_dir .. "/" .. name
@@ -230,10 +232,11 @@ local function clean(package_dir, package)
         lfs.chdir(ROOT_DIR)
 
         local sub_require_path = (current_package_dir):sub(#ROOT_DIR + 2) .. "." .. name .. "." .. NLPM_PACKAGE_NAME
+        ---@type boolean, Package
         local sub_package_ok, sub_package = pcall(require, sub_require_path)
 
         if sub_package_ok and sub_package.dependencies then
-          collect_dependencies(sub_package.dependencies, current_package_dir)
+          collect_dependencies(sub_package.dependencies, current_package_dir, names)
         end
 
         lfs.chdir(original_dir)
@@ -241,7 +244,8 @@ local function clean(package_dir, package)
     end
   end
 
-  collect_dependencies(package.dependencies, package_dir)
+  local dependency_names = {}
+  collect_dependencies(package.dependencies, package_dir, dependency_names)
 
   -- Remove unmarked packages
   local ok, err = lfs.chdir(package_dir)
@@ -294,6 +298,11 @@ local function run_with_nelua_path(packages_dir, script_command)
 end
 
 local function create_default_package_file()
+  if fs.isfile(NLPM_PACKAGE_FILE) then
+    print(("Package file '%s' already exists. Skipping step"):format(NLPM_PACKAGE_FILE))
+    return
+  end
+
   local content = [[
 ---@class PackageDependency
 ---@field name string package name as it will be used in file gen
@@ -323,37 +332,36 @@ return {
 end
 
 local function update_gitignore()
-  local packages_dir_name = "nlpm_packages"
-
   if fs.isfile(GITIGNORE) then
     local file, err = io.open(GITIGNORE, "r")
     mild_assert(file, err)
 
     ---@diagnostic disable-next-line: need-check-nil
-    local content = file:read("a")
+    for line in file:lines() do
+      if line:match("%s*(.+)%s*") == NLPM_PACKAGES then
+        print("File '" .. GITIGNORE .. "' already exists with ignore rule. Skipping step")
+        return -- Already in gitignore
+      end
+    end
     ---@diagnostic disable-next-line: need-check-nil
     file:close()
-
-    if content:match(packages_dir_name) then
-      return -- Already in gitignore
-    end
 
     file, err = io.open(GITIGNORE, "a")
     mild_assert(file, err)
 
     ---@diagnostic disable-next-line: need-check-nil
-    local written, write_err = file:write("\n" .. packages_dir_name)
+    local written, write_err = file:write((platform.is_windows and "\r\n" or "\n") .. NLPM_PACKAGES)
     mild_assert(written, write_err)
 
     ---@diagnostic disable-next-line: need-check-nil
     file:close()
-    print("Appended '" .. packages_dir_name .. "' to .gitignore")
+    print("Appended '" .. NLPM_PACKAGES .. "' to .gitignore")
   else
     local file, err = io.open(GITIGNORE, "w")
     mild_assert(file, err)
 
     ---@diagnostic disable-next-line: need-check-nil
-    local written, write_err = file:write(packages_dir_name)
+    local written, write_err = file:write(NLPM_PACKAGES)
     mild_assert(written, write_err)
 
     ---@diagnostic disable-next-line: need-check-nil
@@ -363,7 +371,8 @@ local function update_gitignore()
 end
 
 local function help()
-  print(([[
+  print(
+    ([[
 Usage: nlpm [-h] [--print-nlpm-path] [--log] <command> ...
 
 Arguments:
@@ -383,8 +392,15 @@ Commands:
    nuke                  Delete the packages directory
 
 Environment Variables:
-   %s    Directory for package installation (default: ./nlpm_packages)
-]]):format(NLPM_PACKAGE_FILE, NLPM_PACKAGE_FILE, NLPM_PACKAGE_FILE, NLPM_PACKAGE_NAME, NLPM_PACKAGE_VARIABLE))
+   %s    Directory for package installation (default: ./%s)]]):format(
+      NLPM_PACKAGE_FILE,
+      NLPM_PACKAGE_FILE,
+      NLPM_PACKAGE_FILE,
+      NLPM_PACKAGE_NAME,
+      NLPM_PACKAGE_VARIABLE,
+      NLPM_PACKAGES
+    )
+  )
 end
 
 local commands = {}
@@ -455,10 +471,8 @@ function commands.clean(packages_dir)
 end
 
 function commands.new()
-  mild_assert(not fs.isfile(NLPM_PACKAGE_FILE), ("Package file '%s' already exists"):format(NLPM_PACKAGE_FILE))
-
-  create_default_package_file()
   update_gitignore()
+  create_default_package_file()
 end
 
 ---@param packages_dir string
@@ -480,7 +494,7 @@ local function main(args)
 
   local command = args[1]
 
-  local packages_dir = fs.abspath(os.getenv(NLPM_PACKAGE_VARIABLE) or "./nlpm_packages")
+  local packages_dir = fs.abspath(os.getenv(NLPM_PACKAGE_VARIABLE) or ("./" .. NLPM_PACKAGES))
 
   for i, arg in ipairs(args) do
     -- Handle help flags (except for run command with --)
