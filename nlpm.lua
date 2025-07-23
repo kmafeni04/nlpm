@@ -7,15 +7,16 @@
 ---@field dependencies? PackageDependency[] List of package dependencies
 ---@field scripts? table<string, string> scripts that can be called with `nlpm script`
 
-local fs = require("nelua.utils.fs")
 local lfs = require("lfs")
+
+local fs = require("nelua.utils.fs")
+local platform = require("nelua.utils.platform")
 
 local NLPM_PACKAGE_NAME <const> = "nlpm_package"
 local NLPM_PACKAGE_FILE <const> = NLPM_PACKAGE_NAME .. ".lua"
 local NLPM_PACKAGE_VARIABLE <const> = "NLPM_PACKAGES_PATH"
 local ROOT_DIR <const> = lfs.currentdir()
 local GITIGNORE <const> = ".gitignore"
-local ON_WINDOWS <const> = package.config:sub(1, 1) == "\\"
 
 local DEFAULT_NELUA_PATHS <const> = {
   "./?.nelua",
@@ -46,7 +47,7 @@ local function run_command(cmd_to_run, cmd_to_log)
     print("RUNNING: " .. (cmd_to_log and cmd_to_log or cmd_to_run) .. "\n")
     result = os.execute(cmd_to_run)
   else
-    result = os.execute(ON_WINDOWS and cmd_to_run .. " > NUL 2>&1" or cmd_to_run .. " > /dev/null 2>&1")
+    result = os.execute(platform.is_windows and cmd_to_run .. " > NUL 2>&1" or cmd_to_run .. " > /dev/null 2>&1")
   end
   return result
 end
@@ -271,7 +272,7 @@ local function make_nlpm_path(packages_dir)
   end
 
   local nelua_path = table.concat(all_nelua_paths, ";")
-  local lua_path = table.concat(lua_package_paths, ";")
+  local lua_path = table.concat(lua_package_paths, platform.luapath_separator)
   return nelua_path, lua_path
 end
 
@@ -279,7 +280,11 @@ end
 ---@param script_command string
 local function run_with_nelua_path(packages_dir, script_command)
   local nelua_path, lua_path = make_nlpm_path(packages_dir)
-  local env_command = ("LUA_PATH='$LUA_PATH;%s' NELUA_PATH='%s' %s"):format(lua_path, nelua_path, script_command)
+  local env_command = ("LUA_PATH='%s;$LUA_PATH' NELUA_PATH='%s;$NELUA_PATH' %s"):format(
+    lua_path,
+    nelua_path,
+    script_command
+  )
 
   log = true
   local success = run_command(env_command, script_command)
