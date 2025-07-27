@@ -288,9 +288,13 @@ end
 ---@param script_command string
 local function run_with_nelua_path(packages_dir, script_command)
   local nelua_path, lua_path = make_nlpm_path(packages_dir)
-  local env_command = ("LUA_PATH='%s;$LUA_PATH' NELUA_PATH='%s;$NELUA_PATH' %s"):format(
+  local nelua_path_env = os.getenv("NELUA_PATH") or ""
+  local lua_path_env = os.getenv("lUA_PATH") or ""
+  local env_command = ("LUA_PATH='%s;%s' NELUA_PATH='%s;%s' %s"):format(
     lua_path,
+    lua_path_env,
     nelua_path,
+    nelua_path_env,
     script_command
   )
 
