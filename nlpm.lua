@@ -140,15 +140,19 @@ local function install(package_dir, dependency, depth)
 
   if not fs.isdir(dep_name) then
     print(('Installing package "%s"...'):format(dep_name))
+    ok, err = lfs.mkdir(dep_name)
+    mild_assert(ok, ("Failed to make directory: %s"):format(err or "unknown error"))
 
-    -- Clone the repository
-    local clone_success = run_command(("git clone --depth 1 %s %s"):format(dependency.repo, dep_name))
+    ok, err = lfs.chdir(dep_name)
+    mild_assert(ok, ("Failed to change directory: %s"):format(err or "unknown error"))
+
+    local clone_success = run_command(("git clone --depth 1 %s %s"):format(dependency.repo, dependency.name))
     mild_assert(
       clone_success,
       ("Failed to clone repository for '%s'. Please verify the repository URL."):format(dep_name)
     )
 
-    ok, err = lfs.chdir(dep_name)
+    ok, err = lfs.chdir(dependency.name)
     mild_assert(ok, ("Failed to enter cloned directory: %s"):format(err or "unknown error"))
 
     if fs.isfile(NLPM_PACKAGE_FILE) then
