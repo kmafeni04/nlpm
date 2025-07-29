@@ -1,6 +1,13 @@
+-- TODO: Add support for adding extra search paths on dependencies
+
+---@class PackageDependencyAddPaths
+---@field nelua string[]
+---@field lua string[]
+
 ---@class PackageDependency
 ---@field name string package name as it will be used in file gen
 ---@field repo string git repo
+---@field add_paths PackageDependencyAddPaths paths, relative to dependency root, that will be added to the nlpm paths
 ---@field version? string git hash(#) or tag(v), defaults to "#HEAD"
 
 ---@class Package
@@ -159,7 +166,14 @@ local function install(package_dir, dependency, depth)
       local current_dir = lfs.currentdir()
       lfs.chdir(ROOT_DIR)
 
-      local sub_require_path = (package_dir):sub(#ROOT_DIR + 2) .. "." .. dep_name .. "." .. NLPM_PACKAGE_NAME
+      -- WARNING: Always check other instance when changing path
+      local sub_require_path = (package_dir):sub(#ROOT_DIR + 2)
+        .. "."
+        .. dep_name
+        .. "."
+        .. dependency.name
+        .. "."
+        .. NLPM_PACKAGE_NAME
       local sub_package_ok, sub_package = pcall(require, sub_require_path)
 
       if sub_package_ok and sub_package.dependencies then
@@ -221,21 +235,30 @@ local function clean(package_dir, package)
   end
 
   --- Collect all dependency names
-  ---@param deps PackageDependency[]
+  ---@param dependencies PackageDependency[]
   ---@param current_package_dir string
   ---@param names {string: boolean}
-  local function collect_dependencies(deps, current_package_dir, names)
-    for _, dep in ipairs(deps) do
-      local name = gen_dep_name(dep)
+  local function collect_dependencies(dependencies, current_package_dir, names)
+    for _, dependency in ipairs(dependencies) do
+      local name = gen_dep_name(dependency)
       names[name] = true
 
       -- Check for sub-dependencies
-      local dep_path = current_package_dir .. "/" .. name
+
+      -- WARNING: Always check other instance when changing path
+      local dep_path = current_package_dir .. "/" .. name .. "/" .. dependency.name
       if fs.isdir(dep_path) and fs.isfile(dep_path .. "/" .. NLPM_PACKAGE_FILE) then
         local original_dir = lfs.currentdir()
         lfs.chdir(ROOT_DIR)
 
-        local sub_require_path = (current_package_dir):sub(#ROOT_DIR + 2) .. "." .. name .. "." .. NLPM_PACKAGE_NAME
+        -- WARNING: Always check other instance when changing path
+        local sub_require_path = (package_dir):sub(#ROOT_DIR + 2)
+          .. "."
+          .. name
+          .. "."
+          .. dependency.name
+          .. "."
+          .. NLPM_PACKAGE_NAME
         ---@type boolean, Package
         local sub_package_ok, sub_package = pcall(require, sub_require_path)
 
@@ -389,7 +412,7 @@ Arguments:
 Options:
    -h, --help            Show this help message and exit
    --print-nlpm-path     Print the nlpm path set for 'NELUA_PATH' and 'LUA_PATH'
-   --log                 Enable command logging 
+   --log                 Enable command logging
 
 Commands:
    install               Install all dependencies from '%s'
